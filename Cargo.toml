@@ -1,0 +1,11 @@
+[package]
+name = "lotka-beats"
+version = "0.1.0"
+edition = "2021"
+description = "Generative music via Lotka-Volterra population dynamics — genres compete, new genres emerge"
+license = "MIT"
+repository = "https://github.com/SuperInstance/lotka-beats"
+keywords = ["music", "lotka-volterra", "generative", "evolution", "ecosystem"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
