@@ -1,116 +1,286 @@
 # lotka-beats
 
-[![crates.io](https://img.shields.io/crates/v/lotka-beats.svg)](https://crates.io/crates/lotka-beats)
-[![docs.rs](https://docs.rs/lotka-beats/badge.svg)](https://docs.rs/lotka-beats)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+**Generative music via Lotka-Volterra population dynamics — genres compete like species, and new fusion genres emerge at equilibrium.**
 
 ## The Problem
 
-How do you generate music that *evolves* over time? Most generative music systems use static rules or random variation. But real musical ecosystems evolve: genres compete for listeners, styles rise and fall, traditions influence each other. This competition creates dynamics that look exactly like ecological population dynamics.
+Generative music systems either sound random (white noise with envelope) or static (looping pre-composed patterns). What's missing is *ecology*: the idea that musical traditions compete, cooperate, and evolve like biological species. Jazz "preys on" blues. Electronic "competes with" rock. At equilibrium, you get fusion genres that don't exist yet — the math *invents* them.
 
-## The Insight
+## The Key Insight
 
 The **Lotka-Volterra equations** model predator-prey dynamics in ecology:
 
 ```
-dA/dt = α·A - β·A·B    (prey grows, gets eaten)
-dB/dt = δ·A·B - γ·B    (predator reproduces, dies off)
+dN₁/dt = N₁(r₁ + a₁₁N₁ + a₁₂N₂)
+dN₂/dt = N₂(r₂ + a₂₁N₁ + a₂₂N₂)
 ```
 
-Replace "prey/predator" with "musical elements" and you get a generative system with genuine ecosystem dynamics:
-- **Genres compete** for the frequency spectrum (like species compete for niches)
-- **Rhythmic patterns prey on** each other (syncopation "eats" straight beats)
-- **Stable coexistence** = a balanced composition where multiple elements coexist
-- **Oscillations** = call-and-response, tension-release cycles
-- **Extinction** = an element fades out naturally
+Each species has a growth rate, death rate, and interaction coefficients with every other species. The dynamics produce:
+- **Oscillations**: predator-prey cycles (jazz rises, blues falls, jazz falls, blues rises...)
+- **Competition**: mutually harmful interactions drive one species to extinction
+- **Coexistence**: negative self-interaction + positive cross-interaction → stable equilibrium
+- **Chaos**: 3+ species with the right interaction matrix → complex, non-repeating dynamics
 
-The music isn't random — it follows deterministic dynamics that produce organic, evolving patterns.
+The "aha moment" is that **equilibrium points are new genres**. When you solve for dN/dt = 0, the population ratios define a fusion genre — say, 60% Jazz, 30% Blues, 10% Ambient. The stability of that equilibrium tells you whether it's a sustainable genre or a transient fad.
 
-## How It Works
+This crate implements:
+- Generalized n-species Lotka-Volterra with RK4 integration
+- Musical species with scales, rhythms, tempo ranges, and timbre profiles
+- Equilibrium analysis via Jacobian eigenvalues
+- Auto-generated genre names for fusion equilibria
+- MIDI output that maps population dynamics to notes
+- 8 pre-defined genre species (Jazz, Classical, Electronic, Folk, Blues, Ambient, Rock, HipHop)
 
-Define musical species (genre, rhythm, motif) with growth rates and interaction coefficients, then integrate the coupled ODEs:
+## Architecture
+
+```
+                    ┌─────────────────────────────┐
+                    │      MusicEcosystem          │
+                    │ (species list, time, dt,     │
+                    │  history of snapshots)        │
+                    └──────────┬──────────────────┘
+                               │
+              ┌────────────────┼──────────────────┐
+              │                │                  │
+    ┌─────────▼──────┐ ┌──────▼──────┐ ┌────────▼───────┐
+    │ MusicalSpecies │ │LotkaVolterra│ │ Equilibrium    │
+    │ (name, scale,  │ │ (RK4 solver │ │ Analysis       │
+    │  rhythm, timbre│ │  for dN/dt) │ │ (fixed points, │
+    │  growth, death,│ │             │ │  stability,    │
+    │  interaction)  │ │             │ │  genre names)  │
+    └────────────────┘ └─────────────┘ └────────────────┘
+              │                │                  │
+              └────────────────┼──────────────────┘
+                               │
+                    ┌──────────▼──────────────────┐
+                    │       MIDI Output            │
+                    │ (ecosystem → MidiSequence,   │
+                    │  population → chord,         │
+                    │  text export)                │
+                    └──────────────────────────────┘
+```
+
+### Module Overview
+
+| Module | Purpose |
+|--------|---------|
+| `species` | MusicalSpecies with scales, rhythms, timbre, interaction coefficients |
+| `dynamics` | Generalized Lotka-Volterra RK4 solver |
+| `ecosystem` | MusicEcosystem — the simulation container |
+| `equilibrium` | Fixed point analysis, stability classification, genre naming |
+| `genre` | Pre-defined species (Jazz, Classical, Electronic, etc.) |
+| `midi` | Ecosystem → MIDI sequence conversion |
+| `error` | Error types |
+
+## The Math: Generalized Lotka-Volterra
+
+For n species with populations N₁, ..., Nₙ:
+
+```
+dNᵢ/dt = Nᵢ × (rᵢ + Σⱼ aᵢⱼ × Nⱼ)
+```
+
+Where:
+- `rᵢ = growth_rateᵢ - death_rateᵢ` (intrinsic growth rate)
+- `aᵢⱼ` = interaction coefficient (effect of species j on species i)
+  - Positive: species j *benefits* species i (mutualism, commensalism)
+  - Negative: species j *harms* species i (competition, predation)
+  - Self-interaction `aᵢᵢ` is usually negative (self-limiting)
+
+### RK4 Integration
+
+We use 4th-order Runge-Kutta for accuracy:
+
+```
+k₁ = f(N)
+k₂ = f(N + dt/2 × k₁)
+k₃ = f(N + dt/2 × k₂)
+k₄ = f(N + dt × k₃)
+N(t+dt) = N(t) + dt/6 × (k₁ + 2k₂ + 2k₃ + k₄)
+```
+
+This is 4th-order accurate: the error is O(dt⁵) per step.
+
+### Equilibrium Analysis
+
+Fixed points are where dN/dt = 0. For non-trivial equilibria (N ≠ 0):
+
+```
+rᵢ + Σⱼ aᵢⱼ × Nⱼ* = 0
+```
+
+This is a linear system A × N* = −r, solved via Gaussian elimination.
+
+Stability is analyzed via the Jacobian at the fixed point:
+
+```
+Jᵢⱼ = aᵢⱼ × Nᵢ*
+```
+
+- All eigenvalues with negative real parts → **Stable** (sustainable genre)
+- Any positive real part → **Unstable** (transient fad)
+- Mixed → **Saddle** (stable in some directions, unstable in others)
+
+## Quick Start
 
 ```rust
-use lotka_beats::{Species, LotkaVolterra, SolverMethod};
+use lotka_beats::{MusicEcosystem, genre};
 
-let jazz = Species::new("jazz", 0.8, 50.0)   // growth_rate, carrying_capacity
-    .with_spectral_position(0.6);             // niche in frequency spectrum
-let electronic = Species::new("electronic", 1.2, 60.0)
-    .with_spectral_position(0.3);
-
-// Competition: how much does each species hinder the other?
-// Closer spectral positions = more competition
-let mut lv = LotkaVolterra::new(vec![jazz, electronic])
-    .competition(0, 1, 0.4)   // jazz vs electronic
-    .competition(1, 0, 0.3)   // electronic vs jazz
-    .dt(0.01)
-    .method(SolverMethod::RK4);
-
-// Integrate forward — watch populations evolve
-for _ in 0..1000 {
-    lv.step();
+// Create a 2-species predator-prey ecosystem
+let mut eco = MusicEcosystem::new(0.1).unwrap();
+for sp in genre::classic_predator_prey() {
+    eco.add_species(sp);
 }
-let populations = lv.populations();
-// jazz might be 32.5, electronic might be 48.2 — coexistence
+
+// Run for 100 time steps
+eco.run(100).unwrap();
+
+println!("Populations: {:?}", eco.populations());
+println!("Total: {:.2}", eco.total_population());
 ```
 
-### From Populations to Music
-
-The population values map to musical parameters:
-- Population → **velocity/loudness** of that genre's voice
-- Growth rate → **tempo** of new material introduction
-- Interaction coefficient → **cross-influence** (one genre's riffs bleed into another)
+## Pre-defined Genre Species
 
 ```rust
-use lotka_beats::music::PopulationToMidi;
+use lotka_beats::genre;
 
-let mapper = PopulationToMidi::new(lv.species());
-let midi_events = mapper.map(&populations, 120.0); // 120 BPM
+// 8 pre-defined genres, each with scales, rhythms, timbre, and tempo
+let jazz = genre::jazz();
+let classical = genre::classical();
+let electronic = genre::electronic();
+let folk = genre::folk();
+let blues = genre::blues();
+let ambient = genre::ambient();
+let rock = genre::rock();
+let hip_hop = genre::hip_hop();
+
+println!("Jazz scale: {:?}", jazz.scale);         // [0,2,3,5,7,9,10]
+println!("Blues rhythm: {:?}", blues.rhythm);     // [0,0.33,0.67]
+println!("Electronic timbre: brightness={}", electronic.timbre.brightness); // 0.9
 ```
 
-### Biodiversity as Composition Quality
-
-Shannon diversity H = -Σ pᵢ ln(pᵢ) measures how balanced the ecosystem is. Low H = one genre dominates (boring). High H = all genres contribute equally (rich). You can use H as a fitness function for evolving better compositions:
+## Building Custom Ecosystems
 
 ```rust
-use lotka_beats::biodiversity::BiodiversityIndex;
+use lotka_beats::{MusicEcosystem, MusicalSpecies, TimbreProfile};
 
-let bio = BiodiversityIndex::from_populations(&populations);
-println!("Shannon H = {:.3} (higher = more diverse)", bio.shannon);
-println!("Simpson D = {:.3} (1 = single species dominates)", bio.simpson);
+let mut eco = MusicEcosystem::new(0.05).unwrap();
+
+// Custom species with interaction coefficients
+let mut dubstep = MusicalSpecies::new("Dubstep", 1.0)
+    .growth_rate(0.15)
+    .death_rate(0.03)
+    .scale(vec![0, 3, 5, 6, 7, 10])
+    .rhythm(vec![0.0, 0.25, 0.5, 0.75])
+    .tempo_range((140.0, 150.0))
+    .timbre(TimbreProfile {
+        brightness: 0.95,
+        warmth: 0.1,
+        complexity: 0.7,
+        dynamics: 0.9,
+    });
+dubstep.interaction = vec![-0.1, 0.02]; // self-limits, benefits from ambient
+
+let mut ambient = MusicalSpecies::new("Ambient", 0.5)
+    .growth_rate(0.03)
+    .death_rate(0.01)
+    .scale(vec![0, 2, 4, 7, 9])
+    .rhythm(vec![0.0, 0.5])
+    .tempo_range((60.0, 90.0));
+ambient.interaction = vec![0.01, -0.05]; // benefits from dubstep, self-limits
+
+eco.add_species(dubstep);
+eco.add_species(ambient);
+
+eco.run(200).unwrap();
 ```
 
-## Solver Details
+## Equilibrium Analysis
 
-Two integration methods:
-- **Euler**: fast, first-order, drifts over long simulations (energy non-conservation)
-- **RK4**: fourth-order Runge-Kutta, much more accurate, recommended for anything >1000 steps
+```rust
+use lotka_beats::{MusicEcosystem, genre, equilibrium};
 
-The system conserves a modified Hamiltonian (energy-like quantity) under certain conditions — the RK4 solver preserves this to ~10⁻⁸ over 10⁴ steps.
+let mut eco = MusicEcosystem::new(0.1).unwrap();
+for sp in genre::classic_predator_prey() {
+    eco.add_species(sp);
+}
 
-## Module Map
+// Find equilibrium genres
+let fixed_points = equilibrium::find_fixed_points(&eco).unwrap();
+for fp in &fixed_points {
+    println!("Genre: {} ({:?})", fp.name.as_deref().unwrap_or("?"), fp.stability);
+    println!("  Populations: {:?}", fp.populations);
+}
+```
 
-| Module | What it does |
-|---|---|
-| `species` | `Species` — a musical element with growth rate, carrying capacity, niche position |
-| `lotka_volterra` | `LotkaVolterra` — coupled ODE system with Euler/RK4 integration |
-| `biodiversity` | `BiodiversityIndex` — Shannon, Simpson diversity for composition quality |
-| `competition` | Competition matrix computation from spectral/temporal niche overlap |
-| `equilibrium` | Fixed-point finder + stability analysis (Jacobian eigenvalues) |
-| `succession` | `SuccessionModel` — ecosystem evolution over generational time |
-| `music` | `PopulationToMidi` — map population dynamics to MIDI events |
+## MIDI Output
 
-## Design Decisions
+```rust
+use lotka_beats::{MusicEcosystem, genre, midi};
 
-- **Why Lotka-Volterra and not a neural network?** LV gives you deterministic, interpretable dynamics. You can *reason* about why a genre died out (high competition coefficient) or why two elements coexist (orthogonal niches). Neural nets give you numbers without understanding.
-- **Why not just use the competition matrix directly?** The competition matrix tells you steady-state behavior, but not the *trajectory*. A piece of music lives in time — you need the dynamics, not just the endpoint.
-- **RK4 over Euler**: For music, Euler's tendency to gain or lose energy translates to compositions that "fade in energy" or "get manic" over time. RK4 avoids this.
+let mut eco = MusicEcosystem::new(0.1).unwrap();
+for sp in genre::classic_predator_prey() {
+    eco.add_species(sp);
+}
+eco.run(10).unwrap();
 
-## Links
+// Convert to MIDI sequence
+let seq = midi::ecosystem_to_midi(&eco).unwrap();
+println!("Events: {}", seq.events.len());
+println!("Tempo: {:.1} BPM", seq.tempo_bpm);
 
-- [Documentation](https://docs.rs/lotka-beats)
-- [Repository](https://github.com/SuperInstance/lotka-beats)
-- [crates.io](https://crates.io/crates/lotka-beats)
+// Text export
+let text = midi::midi_to_text(&seq);
+println!("{}", text);
+
+// Population → chord
+let chord = midi::population_to_chord(&eco.species, &eco.populations());
+println!("Chord: {:?}", chord);
+```
+
+## Shannon Diversity
+
+The ecosystem computes Shannon entropy as a diversity metric:
+
+```
+H = −Σ (Nᵢ/N_total) × ln(Nᵢ/N_total)
+```
+
+- H = 0: one species dominates (monoculture)
+- H = ln(n): all species equally present (maximum diversity)
+
+```rust
+use lotka_beats::MusicEcosystem;
+
+let diversity = MusicEcosystem::shannon_diversity(&[0.5, 0.3, 0.2]);
+println!("Diversity: {:.3} (max for 3 species: {:.3})", diversity, 3.0_f64.ln());
+```
+
+## Performance
+
+- **RK4 step**: O(n²) where n = number of species
+- **Equilibrium solving**: O(n³) via Gaussian elimination
+- **MIDI generation**: O(species × history_steps)
+- Typical: 2-3 species, 1000 steps → <1ms
+
+## Comparison
+
+| Feature | lotka-beats | Conventional generative music | Markov chain music |
+|---------|------------|------------------------------|-------------------|
+| Model | Lotka-Volterra ecology | Random/stochastic | Transition probabilities |
+| Emergence | ✅ Fusion genres at equilibrium | ❌ Pre-defined | Partial |
+| Dynamics | ✅ Predator-prey oscillation | ❌ | ❌ |
+| Genre theory | ✅ Equilibrium = new genre | ❌ | ❌ |
+| MIDI output | ✅ Built-in | Varies | Varies |
+| Stability analysis | ✅ Jacobian eigenvalues | ❌ | ❌ |
+
+## SuperInstance Ecosystem
+
+`lotka-beats` integrates with:
+- `groovemesh-plr` — PLR voice-leading for smooth chord transitions within species
+- `tropical-synth` — Tropical timbre mapping for species timbre profiles
+- `spreadsheet-engine` — Lotka-Volterra as a simulation cell type
+- `noether-guard` — Conservation checking for population dynamics
 
 ## License
 
